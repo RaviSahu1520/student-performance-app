@@ -1,135 +1,67 @@
-# =====================================================
-# 🎓 Student Performance Prediction - Streamlit App (Linear Regression)
-# =====================================================
+# student_performance_app.py
 
 import streamlit as st
 import pandas as pd
 import numpy as np
-import pickle
-import os
+from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import mean_absolute_error, r2_score
 
-# ---------------------------
-# Page Setup
-# ---------------------------
-st.set_page_config(page_title="Student Performance Predictor", layout="centered")
+# =============================
+# LOAD DATA AND TRAIN MODEL
+# =============================
+
+# Load dataset
+data = pd.read_csv("Student_Performance.csv")
+
+# Encode categorical column
+encoder = LabelEncoder()
+data["Extracurricular Activities"] = encoder.fit_transform(data["Extracurricular Activities"])
+
+# Split data
+X = data.drop(columns="Performance Index")
+y = data["Performance Index"]
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Train model
+model = LinearRegression()
+model.fit(X_train, y_train)
+
+# =============================
+# STREAMLIT UI
+# =============================
+
+st.set_page_config(page_title="Student Performance Predictor", page_icon="📊", layout="centered")
 
 st.title("🎓 Student Performance Prediction App")
-st.write("Train and use a Linear Regression model to predict student performance based on various academic and behavioral factors.")
+st.write("Enter student details below to predict their **Performance Index**.")
 
-# ---------------------------
-# Load Dataset
-# ---------------------------
-@st.cache_data
-def load_data():
-    return pd.read_csv("Student_Performance.csv")
+# Input fields
+hours_studied = st.number_input("📘 Hours Studied", min_value=0, max_value=24, value=6)
+previous_scores = st.number_input("📊 Previous Scores", min_value=0, max_value=100, value=70)
+extracurricular = st.selectbox("🏅 Extracurricular Activities", options=["Yes", "No"])
+sleep_hours = st.number_input("😴 Sleep Hours", min_value=0, max_value=24, value=8)
+papers_practiced = st.number_input("📄 Sample Question Papers Practiced", min_value=0, max_value=20, value=3)
 
-try:
-    data = load_data()
-    st.subheader("📊 Dataset Overview")
-    st.dataframe(data.head())
-except FileNotFoundError:
-    st.error("⚠️ 'Student_Performance.csv' file not found in this directory.")
-    st.stop()
+# Prepare input
+extracurricular_encoded = encoder.transform([extracurricular])[0]
+input_data = np.array([[hours_studied, previous_scores, extracurricular_encoded, sleep_hours, papers_practiced]])
 
-# ---------------------------
-# Model Training Section
-# ---------------------------
-st.markdown("### 🔧 Model Training")
+# Predict button
+if st.button("🔍 Predict Performance"):
+    prediction = np.round(model.predict(input_data)[0], 2)
 
-target_col = st.selectbox("🎯 Select Target Column (Performance / Score)", data.columns)
-feature_cols = [c for c in data.columns if c != target_col]
+    st.success(f"🎯 Predicted Performance Index: **{prediction}**")
 
-X = data[feature_cols].copy()
-y = data[target_col].copy()
+    # Optionally display model evaluation
+    r2 = r2_score(y_test, model.predict(X_test))
+    mae = mean_absolute_error(y_test, model.predict(X_test))
+    st.write("---")
+    st.write("📈 **Model Performance Metrics:**")
+    st.metric("R² Score", f"{r2:.3f}")
+    st.metric("Mean Absolute Error", f"{mae:.3f}")
 
-# Encode categorical columns
-label_encoders = {}
-for col in X.columns:
-    if X[col].dtype == "object":
-        le = LabelEncoder()
-        X[col] = le.fit_transform(X[col])
-        label_encoders[col] = le
-
-# Encode target if categorical
-if y.dtype == "object":
-    y_le = LabelEncoder()
-    y = y_le.fit_transform(y)
-else:
-    y_le = None
-
-# Train Model Button
-if st.button("🚀 Train Model"):
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
-
-    model = LinearRegression()
-    model.fit(X_train, y_train)
-    score = model.score(X_test, y_test)
-
-    st.success(f"✅ Model trained successfully using Linear Regression! R² Score: **{score:.2f}**")
-
-    # Save model
-    with open("student_model.pkl", "wb") as f:
-        pickle.dump((model, label_encoders, y_le, feature_cols, target_col), f)
-
-    st.download_button(
-        label="📥 Download Trained Model (.pkl)",
-        data=open("student_model.pkl", "rb"),
-        file_name="student_model.pkl",
-        mime="application/octet-stream",
-    )
-
-# ---------------------------
-# Load Trained Model Section
-# ---------------------------
-st.markdown("### 📂 Load Existing Model")
-
-model_path = "student_model.pkl"
-
-if os.path.exists(model_path):
-    with open(model_path, "rb") as f:
-        model, label_encoders, y_le, feature_cols, target_col = pickle.load(f)
-    st.success("✅ Existing model loaded successfully!")
-else:
-    st.info("ℹ️ No saved model found yet. Train the model first to create one.")
-
-# ---------------------------
-# Prediction Section
-# ---------------------------
-if "model" in locals():
-    st.markdown("### 🧮 Make a Prediction")
-
-    input_data = {}
-    for col in feature_cols:
-        if data[col].dtype == "object":
-            val = st.selectbox(f"{col}", data[col].unique())
-        else:
-            val = st.number_input(
-                f"{col}",
-                float(data[col].min()),
-                float(data[col].max()),
-                float(data[col].mean()),
-            )
-        input_data[col] = val
-
-    if st.button("🔍 Predict Performance"):
-        df = pd.DataFrame([input_data])
-
-        # Apply same encoding as training
-        for col, le in label_encoders.items():
-            df[col] = le.transform(df[col])
-
-        prediction = model.predict(df)[0]
-
-        # Decode prediction if label encoded
-        if y_le:
-            prediction = y_le.inverse_transform([int(round(prediction))])[0]
-
-        st.subheader(f"🎯 Predicted {target_col}: **{prediction}**")
-
-st.markdown("---")
-st.caption("Built with ❤️ using Streamlit")
+# Add small footer
+st.write("---")
+st.caption("Developed with ❤️ using Streamlit | Powered by Linear Regression")
